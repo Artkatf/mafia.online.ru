@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Мафия - Настольная Игра</title>
-    <!-- Подключаем клиентскую библиотеку Socket.IO -->
+    <!-- Автоматическое подключение сокетов с сервера Render -->
     <script src="/socket.io/socket.io.js"></script>
     <style>
         body { font-family: 'Arial', sans-serif; background-color: #1a1a1a; color: #ffffff; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
-        .container { background-color: #262626; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); text-align: center; width: 100%; max-width: 450px; }
+        .container { background-color: #262626; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); text-align: center; width: 100%; max-width: 450px; position: relative; }
         h1, h2, h3 { color: #ff4d4d; margin-top: 0; }
         button { background-color: #444; color: white; border: none; padding: 12px 20px; margin: 10px 0; width: 100%; border-radius: 5px; font-size: 16px; cursor: pointer; transition: background-color 0.2s; }
         button:hover { background-color: #555; }
@@ -18,10 +18,14 @@
         #start-game-btn:hover { background-color: #218838; }
         .player-card { background-color: #333; padding: 12px; margin: 8px 0; border-radius: 5px; border-left: 5px solid #ff4d4d; text-align: left; font-size: 16px; }
         .status-text { margin-top: 15px; color: #bbb; font-style: italic; }
+        .counter-badge { position: absolute; top: 15px; left: 15px; background-color: #ff4d4d; color: white; padding: 4px 10px; border-radius: 15px; font-weight: bold; font-size: 14px; display: none; }
     </style>
 </head>
 <body>
 <div class="container">
+
+    <!-- Живой счетчик игроков -->
+    <div id="room-player-counter" class="counter-badge">1/5</div>
 
     <!-- Экран 1: Редактор персонажа -->
     <div id="screen-main-menu">
@@ -72,7 +76,7 @@
 
     <!-- Экран 6: Ожидание игроков -->
     <div id="screen-waiting" style="display: none;">
-        <h2>Комната создана!</h2>
+        <h2 id="waiting-room-title">Комната создана!</h2>
         <p id="waiting-status-text">Ждем, пока кто-то зайдет к тебе...</p>
         <button id="start-game-btn">Начать игру</button>
     </div>
@@ -90,23 +94,23 @@
     </div>
 
 </div> <!-- Конец контейнера --><script>
-    // Инициализируем сетевое подключение через Socket.IO
     const socket = io(); 
-
     let currentRoom = null;
     let isHost = false;
 
-    // Универсальная функция переключения экранов
+    // Смена экранов + включение/выключение значка счетчика 1/5
     function switchScreen(hideId, showId) {
-        const screenToHide = document.getElementById(hideId);
-        const screenToShow = document.getElementById(showId);
-        if (screenToHide && screenToShow) {
-            screenToHide.style.display = 'none';
-            screenToShow.style.display = 'block';
+        document.getElementById(hideId).style.display = 'none';
+        document.getElementById(showId).style.display = 'block';
+        
+        const counter = document.getElementById('room-player-counter');
+        if (showId === 'screen-waiting' || showId === 'screen-game-table') {
+            counter.style.display = 'block';
+        } else {
+            counter.style.display = 'none';
         }
     }
 
-    // Проверка заполнения полей для создания комнаты
     const createNameInput = document.getElementById('input-create-name');
     const createPassInput = document.getElementById('input-create-pass');
     const saveRoomBtn = document.getElementById('save-room-btn');
@@ -123,16 +127,10 @@
         }
     }
 
-    if (createNameInput && createPassInput) {
-        createNameInput.addEventListener('input', checkInputs);
-        createPassInput.addEventListener('input', checkInputs);
-    }
+    createNameInput.addEventListener('input', checkInputs);
+    createPassInput.addEventListener('input', checkInputs);
 
-    // ==========================================
-    // ЛОГИКА ОНЛАЙНА: ОТПРАВКА СОБЫТИЙ НА СЕРВЕР
-    // ==========================================
-
-    // Создание комнаты (кнопка "Сохранить")
+    // Событие кнопки "Сохранить"
     saveRoomBtn.addEventListener('click', () => {
         const roomName = createNameInput.value.trim();
         const roomPass = createPassInput.value.trim();
@@ -142,7 +140,7 @@
         socket.emit('create_room', { roomName, roomPass, nickname, skin });
     });
 
-    // Подключение к комнате (кнопка "Подключиться")
+    // Событие кнопки "Подключиться"
     document.getElementById('btn-connect-now').addEventListener('click', () => {
         const roomPass = document.getElementById('input-join-pass').value.trim();
         const nickname = document.getElementById('player-nickname').value.trim();
@@ -151,44 +149,31 @@
         socket.emit('join_room', { roomPass, nickname, skin });
     });
 
-    // Запуск матча хостом
-    document.getElementById('start-game-btn').addEventListener('click', () => {
-        socket.emit('start_game', { roomName: currentRoom });
-    });
-
-    // Распределение ролей админом
-    document.getElementById('btn-action-distribute').addEventListener('click', () => {
-        socket.emit('distribute_roles', { roomName: currentRoom });
-    });
-
-    // Пропуск фазы дня/ночи
-    document.getElementById('btn-action-skip').addEventListener('click', () => {
-        socket.emit('skip_phase', { roomName: currentRoom });
-    });
-
-    // ==========================================
-    // ЛОГИКА ОНЛАЙНА: ПРИЕМ ОТВЕТОВ ОТ СЕРВЕРА
-    // ==========================================
-
-    // Комната успешно создана
     socket.on('room_created', (data) => {
-        currentRoom = data.roomName;
+        currentRoom = data.roomPass;
         isHost = true;
+        document.getElementById('waiting-room-title').innerText = data.roomName;
+        document.getElementById('room-player-counter').innerText = data.countText;
         switchScreen('screen-create-room', 'screen-waiting');
         document.getElementById('start-game-btn').style.display = 'block';
     });
 
-    // Игрок успешно зашел в комнату
     socket.on('room_joined', (data) => {
-        currentRoom = data.roomName;
+        currentRoom = data.roomPass;
         isHost = false;
+        document.getElementById('waiting-room-title').innerText = data.roomName;
+        document.getElementById('room-player-counter').innerText = data.countText;
+        document.getElementById('waiting-status-text').innerText = 'Ожидаем, пока создатель запустит сессию...';
         switchScreen('screen-join-room', 'screen-waiting');
         document.getElementById('start-game-btn').style.display = 'none';
-        document.getElementById('waiting-status-text').innerText = `Вы вошли в комнату "${data.roomName}". Ожидаем начала игры...`;
     });
 
-    // Динамическое обновление списка подключенных игроков
-    socket.on('update_players_list', (players) => {const listContainer = document.getElementById('players-ingame-list');
+    socket.on('update_room_counter', (countText) => {
+        document.getElementById('room-player-counter').innerText = countText;
+    });
+
+    socket.on('update_players_list', (players) => {
+        const listContainer = document.getElementById('players-ingame-list');
         if (listContainer) {
             listContainer.innerHTML = '';
             players.forEach(player => {
@@ -200,28 +185,6 @@
         }
     });
 
-    // Начало игры
-    socket.on('game_started', () => {
-        switchScreen('screen-waiting', 'screen-game-table');
-        if (isHost) {
-            document.getElementById('host-admin-panel').style.display = 'block';
-        }
-    });
-
-    // Сервер прислал роль игроку
-    socket.on('receive_role', (role) => {
-        const roleAlert = document.getElementById('role-alert');
-        if (roleAlert) {
-            roleAlert.innerText = `Ваша роль: ${role}`;
-        }
-    });
-
-    // Изменение фазы (день/ночь/голосование)
-    socket.on('status_change', (statusText) => {
-        document.getElementById('current-game-status').innerText = statusText;
-    });
-
-    // Ошибки (например, комната не найдена или неверный пароль)
     socket.on('error_message', (msg) => {
         alert(msg);
     });
