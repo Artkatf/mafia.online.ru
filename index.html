@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мафия - Настольная Игра</title>
+    <script src="https://socket.io"></script>
+    <style>
+        body { font-family: 'Arial', sans-serif; background-color: #1a1a1a; color: #ffffff; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .container { background-color: #262626; padding: 30px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); text-align: center; width: 100%; max-width: 450px; }
+        h1, h2, h3 { color: #ff4d4d; margin-top: 0; }
+        button { background-color: #444; color: white; border: none; padding: 12px 20px; margin: 10px 0; width: 100%; border-radius: 5px; font-size: 16px; cursor: pointer; transition: background-color 0.2s; }
+        button:hover { background-color: #555; }
+        input, select { width: 100%; padding: 12px; margin: 10px 0; border-radius: 5px; border: 1px solid #444; background-color: #333; color: white; font-size: 16px; box-sizing: border-box; }
+        #save-room-btn { background-color: #a66f6f; cursor: not-allowed; }
+        #start-game-btn { background-color: #28a745; display: none; }
+        #start-game-btn:hover { background-color: #218838; }
+        .player-card { background-color: #333; padding: 12px; margin: 8px 0; border-radius: 5px; border-left: 5px solid #ff4d4d; text-align: left; font-size: 16px; }
+        .status-text { margin-top: 15px; color: #bbb; font-style: italic; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div id="screen-main-menu">
+        <h1>Мафия</h1>
+        <h3>Редактор персонажа</h3>
+        <p>Напишите никнейм или фамилию:</p>
+        <input type="text" id="player-nickname" value="Игрок">
+        <p>Выберите внешность и костюм:</p>
+        <select id="player-skin">
+            <option value="Суровый Дон Сальери (Черный галстук)">Суровый Дон Сальери (Черный галстук)</option>
+            <option value="Молодой гангстер (Взгляд исподлобья)">Молодой гангстер (Взгляд исподлобья)</option>
+            <option value="Аль Капоне (Классический костюм)">Аль Капоне (Классический костюм)</option>
+            <option value="Хладнокровный Киллер (Красный галстук)">Хладнокровный Киллер (Красный галстук)</option>
+        </select>
+        <button id="btn-go-to-modes">Играть / Изменить персонажа</button>
+    </div><div id="screen-modes" style="display: none;">
+        <h2>Выберите режим игры</h2>
+        <button id="btn-mode-online">Онлайн с игроками</button>
+        <button id="btn-mode-offline" onclick="alert('Офлайн режим на тех. обслуживании.')">Офлайн с ботами</button>
+        <button onclick="switchScreen('screen-modes', 'screen-main-menu')">Назад</button>
+    </div>
+
+    <div id="screen-online-menu" style="display: none;">
+        <h2>Онлайн режим</h2>
+        <button id="btn-show-create">Создать комнату</button>
+        <button id="btn-show-join">Подключиться к комнате</button>
+        <button onclick="switchScreen('screen-online-menu', 'screen-modes')">Назад</button>
+    </div>
+
+    <div id="screen-create-room" style="display: none;">
+        <h2>Создание комнаты</h2>
+        <input type="text" id="input-create-name" placeholder="Название комнаты">
+        <input type="text" id="input-create-pass" placeholder="Пароль комнаты">
+        <button id="save-room-btn" disabled>Сохранить</button>
+        <button onclick="switchScreen('screen-create-room', 'screen-online-menu')">Назад</button>
+    </div>
+
+    <div id="screen-join-room" style="display: none;">
+        <h2>Подключение по паролю</h2>
+        <input type="text" id="input-join-pass" placeholder="Введите пароль комнаты">
+        <button id="btn-connect-now">Подключиться</button>
+        <button onclick="switchScreen('screen-join-room', 'screen-online-menu')">Назад</button>
+    </div>
+
+    <div id="screen-waiting" style="display: none;">
+        <h2>Комната создана!</h2>
+        <p id="waiting-status-text">Ждем, пока кто-то зайдет к тебе...</p>
+        <button id="start-game-btn">Начать игру</button>
+    </div>
+
+    <div id="screen-game-table" style="display: none;">
+        <h2>Игровой стол (Онлайн)</h2>
+        <div id="role-alert" style="font-size: 18px; margin-bottom: 20px; font-weight: bold; color: #ffcc00;"></div>
+        <div id="players-ingame-list"></div>
+        <div id="host-admin-panel" style="display: none; margin-top: 20px;">
+            <button id="btn-action-distribute" style="background-color: #e0a800; color: black; font-weight: bold;">Распределить роли</button>
+            <button id="btn-action-skip" style="background-color: #17a2b8;">Пропустить ход/фазу</button>
+        </div>
+        <p id="current-game-status" class="status-text">Ожидание действий создателя комнаты...</p>
+    </div>
+</div><script>
+    const SERVER_URL = "https://onrender.com"; 
+    const socket = io(SERVER_URL);
+    let isRoomCreator = false, currentRoomId = null, myNickname = "Игрок", mySkin = "";
+
+    function switchScreen(h, s) { document.getElementById(h).style.display = 'none'; document.getElementById(s).style.display = 'block'; }
+
+    document.getElementById('btn-go-to-modes').addEventListener('click', () => {
+        myNickname = document.getElementById('player-nickname').value.trim() || "Игрок";
+        mySkin = document.getElementById('player-skin').value;
+        switchScreen('screen-main-menu', 'screen-modes');
+    });
+    document.getElementById('btn-mode-online').addEventListener('click', () => switchScreen('screen-modes', 'screen-online-menu'));
+    document.getElementById('btn-show-create').addEventListener('click', () => switchScreen('screen-online-menu', 'screen-create-room'));
+    document.getElementById('btn-show-join').addEventListener('click', () => switchScreen('screen-online-menu', 'screen-join-room'));
+
+    const cName = document.getElementById('input-create-name'), cPass = document.getElementById('input-create-pass'), sBtn = document.getElementById('save-room-btn');
+    function checkInputs() {
+        if(cName.value.trim() !== "" && cPass.value.trim() !== "") { sBtn.style.backgroundColor = "#ff4d4d"; sBtn.style.cursor = "pointer"; sBtn.disabled = false; }
+        else { sBtn.style.backgroundColor = "#a66f6f"; sBtn.style.cursor = "not-allowed"; sBtn.disabled = true; }
+    }
+    cName.addEventListener('input', checkInputs); cPass.addEventListener('input', checkInputs);
+
+    sBtn.addEventListener('click', () => socket.emit('create_room', { roomName: cName.value.trim(), password: cPass.value.trim(), nickname: myNickname, skin: mySkin }));
+    socket.on('room_created', (d) => { isRoomCreator = true; currentRoomId = d.roomId; switchScreen('screen-create-room', 'screen-waiting'); });
+
+    document.getElementById('btn-connect-now').addEventListener('click', () => socket.emit('join_room', { password: document.getElementById('input-join-pass').value.trim(), nickname: myNickname, skin: mySkin }));
+    socket.on('join_success', (d) => { isRoomCreator = false; currentRoomId = d.roomId; switchScreen('screen-join-room', 'screen-game-table'); document.getElementById('role-alert').innerText = "Вы в игре! Ожидайте старта."; renderP(d.players); });
+    socket.on('join_error', (d) => alert(d.message));
+    socket.on('player_joined', (d) => { if (isRoomCreator) { document.getElementById('waiting-status-text').innerText = "Игрок подключился!"; document.getElementById('start-game-btn').style.display = 'block'; renderP(d.players); } });
+
+    function renderP(list) {
+        const out = document.getElementById('players-ingame-list'); out.innerHTML = "";
+        list.forEach(p => { const div = document.createElement('div'); div.className = "player-card"; div.innerHTML = `<strong>${p.nickname}</strong><br><small>Костюм: ${p.skin}</small>`; out.appendChild(div); });
+    }
+
+    document.getElementById('start-game-btn').addEventListener('click', () => socket.emit('start_game', { roomId: currentRoomId }));
+    socket.on('game_started', () => { if (isRoomCreator) { switchScreen('screen-waiting', 'screen-game-table'); document.getElementById('host-admin-panel').style.display = 'block'; } document.getElementById('current-game-status').innerText = "Игра началась! Ожидайте распределения."; });
+
+    document.getElementById('btn-action-distribute').addEventListener('click', () => { if(isRoomCreator) socket.emit('game_action', { roomId: currentRoomId, action: 'distribute' }); });
+    document.getElementById('btn-action-skip').addEventListener('click', () => { if(isRoomCreator) socket.emit('game_action', { roomId: currentRoomId, action: 'skip' }); });
+
+    socket.on('receive_action', (d) => {if (d.action === 'distribute') { document.getElementById('role-alert').innerText = "Ваша роль: " + (isRoomCreator ? "Мафия (Дон Сальери)" : "Мирный житель"); document.getElementById('current-game-status').innerText = "Роли выданы! Ночь."; }
+        if (d.action === 'skip') { document.getElementById('current-game-status').innerText = "Фаза пропущена. День."; }
+    });
+    socket.on('player_disconnected', () => { alert("Игрок вышел."); location.reload(); });
+</script>
+</body>
+</html>
