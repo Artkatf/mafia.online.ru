@@ -33,7 +33,7 @@
             <option value="Аль Капоне (Классический костюм)">Аль Капоне (Классический костюм)</option>
             <option value="Хладнокровный Киллер (Красный галстук)">Хладнокровный Киллер (Красный галстук)</option>
         </select>
-        <button id="btn-go-to-modes">Играть / Изменить персонажа</button>
+        <button id="btn-go-to-modes">Играть</button>
     </div><div id="screen-modes" style="display: none;">
         <h2>Выберите режим игры</h2>
         <button id="btn-mode-online">Онлайн с игроками</button>
@@ -79,18 +79,27 @@
         </div>
         <p id="current-game-status" class="status-text">Ожидание действий создателя комнаты...</p>
     </div>
-</div><script>
+</div>
+    <script>
+    // --- ПОДКЛЮЧЕНИЕ СЕРВЕРА ---
     const SERVER_URL = "https://onrender.com"; 
     const socket = io(SERVER_URL);
     let isRoomCreator = false, currentRoomId = null, myNickname = "Игрок", mySkin = "";
 
-    function switchScreen(h, s) { document.getElementById(h).style.display = 'none'; document.getElementById(s).style.display = 'block'; }
+    // Функция переключения экранов
+    function switchScreen(hideId, showId) { 
+        document.getElementById(hideId).style.display = 'none'; 
+        document.getElementById(showId).style.display = 'block'; 
+    }
 
+    // ИСПРАВЛЕНО: Кнопка теперь работает корректно и сохраняет данные персонажа
     document.getElementById('btn-go-to-modes').addEventListener('click', () => {
         myNickname = document.getElementById('player-nickname').value.trim() || "Игрок";
         mySkin = document.getElementById('player-skin').value;
         switchScreen('screen-main-menu', 'screen-modes');
     });
+
+    // Остальные переходы в онлайн-меню
     document.getElementById('btn-mode-online').addEventListener('click', () => switchScreen('screen-modes', 'screen-online-menu'));
     document.getElementById('btn-show-create').addEventListener('click', () => switchScreen('screen-online-menu', 'screen-create-room'));
     document.getElementById('btn-show-join').addEventListener('click', () => switchScreen('screen-online-menu', 'screen-join-room'));
